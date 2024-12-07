@@ -2,59 +2,60 @@ import instaloader
 import requests
 import re
 import json
+import time
+import pickle
 
 # Constants
-API_URL = "http://127.0.0.1:5000/predict"  # The URL of your Flask app
+API_URL = "http://127.0.0.1:5001/predict"  # The URL of your Flask app
 
-def extract_features(username):
+# Load the scaler (make sure scaler.pkl is in the correct location)
+with open('./model/scaler.pkl', 'rb') as f:
+    scaler = pickle.load(f)
+
+def extract_features_instaloader(username):  # Renamed function
     """
     Extracts features from an Instagram profile using Instaloader.
     """
     loader = instaloader.Instaloader()
-    profile = instaloader.Profile.from_username(loader.context, username)
 
-    # Extract additional profile info
-    profile_info = {
-        "Username": profile.username,
-        "Full Name": profile.full_name,
-        "Biography": profile.biography,
-        "External URL": profile.external_url,
-        "Private": profile.is_private,
-        "Verified": profile.is_verified,
-        "Business Account": profile.is_business_account,
-        "Posts": profile.mediacount,
-        "Followers": profile.followers,
-        "Follows": profile.followees,
-    }
+    try:
+        profile = instaloader.Profile.from_username(loader.context, username)
 
-    # Extract feature vector
-    profile_pic = 1 if profile.profile_pic_url else 0  # 1 if profile picture exists, else 0
-    nums_length_username = sum(c.isdigit() for c in profile.username) / len(profile.username)
-    fullname_words = len(profile.full_name.split())
-    nums_length_fullname = sum(c.isdigit() for c in profile.full_name) / max(len(profile.full_name), 1)
-    name_equals_username = 1 if profile.full_name.replace(" ", "").lower() == profile.username.lower() else 0
-    description_length = len(profile.biography)
-    external_url = 1 if profile.external_url else 0
-    is_private = 1 if profile.is_private else 0
-    num_posts = profile.mediacount
-    num_followers = profile.followers
-    num_follows = profile.followees
+        # Extract feature vector
+        profile_pic = 1 if profile.profile_pic_url else 0  # 1 if profile picture exists, else 0
+        nums_length_username = sum(c.isdigit() for c in profile.username) / len(profile.username)
+        fullname_words = len(profile.full_name.split())
+        nums_length_fullname = sum(c.isdigit() for c in profile.full_name) / max(len(profile.full_name), 1)
+        name_equals_username = 1 if profile.full_name.replace(" ", "").lower() == profile.username.lower() else 0
+        description_length = len(profile.biography)
+        external_url = 1 if profile.external_url else 0
+        is_private = 1 if profile.is_private else 0
+        num_posts = profile.mediacount
+        num_followers = profile.followers
+        num_follows = profile.followees
 
-    features = [
-        profile_pic,
-        nums_length_username,
-        fullname_words,
-        nums_length_fullname,
-        name_equals_username,
-        description_length,
-        external_url,
-        is_private,
-        num_posts,
-        num_followers,
-        num_follows,
-    ]
+        features = [
+            profile_pic,
+            nums_length_username,
+            fullname_words,
+            nums_length_fullname,
+            name_equals_username,
+            description_length,
+            external_url,
+            is_private,
+            num_posts,
+            num_followers,
+            num_follows,
+        ]
 
-    return profile_info, features
+        return features  # Return only the features list
+
+    except instaloader.exceptions.ProfileNotExistsException:
+        print("Error: Profile does not exist.")
+        return None
+    except Exception as e:
+        print(f"Error: {e}")
+        return None
 
 def send_to_model(features):
     """
@@ -97,15 +98,24 @@ def display_features(features):
 def main():
     username = input("Enter Instagram username: ")
     try:
-        # Extract features and profile info
-        profile_info, features = extract_features(username)
-        display_profile_info(profile_info)  # Display all profile details
-        display_features(features)  # Display the feature vector
+        # Extract features using the renamed function
+        features = extract_features_instaloader(username)
 
-        # Send features to the model for prediction
-        print("\n=== Prediction ===")
-        result = send_to_model(features)
-        print(json.dumps(result, indent=4))  # Nicely format JSON output
+        if features:
+            # Display the feature vector
+            display_features(features)
+
+            # Scale the features using the loaded scaler
+            scaled_features = scaler.transform([features])
+            scaled_features = scaled_features.tolist()[0]
+
+            # Send features to the model for prediction
+            print("\n=== Prediction ===")
+            result = send_to_model(scaled_features)  # Send scaled features to the model
+            print(json.dumps(result, indent=4))  # Nicely format JSON output
+
+            # Add a delay to avoid rate limiting (adjust as needed)
+            time.sleep(2)
 
     except instaloader.exceptions.ProfileNotExistsException:
         print("Error: Profile does not exist.")
